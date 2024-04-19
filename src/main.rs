@@ -1,26 +1,58 @@
 use std::{env::current_dir, io::Write, path::PathBuf};
 
 use anyhow::Result;
-use clap::{value_parser, Arg, Command};
+use clap::{value_parser, Arg, ArgMatches, Command, Subcommand};
 use indoc::formatdoc;
 
 fn main() -> Result<()> {
     let path_str = current_dir()?.as_os_str().to_string_lossy().to_string();
 
-    let cmd = Command::new("cozy").subcommand(
-        Command::new("init")
-            .arg(
-                Arg::new("path")
-                    .long("path")
-                    .short('p')
-                    .require_equals(false)
-                    .default_value(path_str)
-                    .value_parser(value_parser!(PathBuf)),
-            )
-            .arg(Arg::new("name").required(true)),
-    );
+    let cmd = Command::new("cozy").subcommand(init(path_str));
 
     let binding = cmd.get_matches();
+    init_matches(binding)?;
+    Ok(())
+}
+
+struct File;
+struct Dir;
+
+struct Project {
+    dune_project: File,
+    opam_file: File,
+    bin: Option<Dir>,
+}
+
+impl Project {
+    fn new(dune_project: String, opam_file: String, bin: String) {
+        todo!()
+    }
+    fn create_dune_project() {
+        let dune_project_contents = dune_project(name.clone())?;
+        let dune_project_file = dir_path.join("dune_project");
+        let mut dune_project_file = touch(&dune_project_file)?;
+        dune_project_file.write(dune_project_contents.as_bytes())?;
+        todo!()
+    }
+    fn create_opam_file() {
+        let mut opam_file = String::new();
+        opam_file.push_str(name.clone().as_str());
+        opam_file.push_str(".opam");
+
+        let opam_file = touch(&dir_path.join(opam_file))?;
+        todo!()
+    }
+    fn create_bin_dir() {
+        let bin_dir = mkdir(&dir_path.join("bin"))?;
+        // main.ml file inside bin
+        let main_ml_contents = main_ml()?;
+        let mut main_ml_file = touch(&dir_path.join("bin").join("main.ml"))?;
+        main_ml_file.write(main_ml_contents.as_bytes())?;
+        todo!()
+    }
+}
+
+fn init_matches(binding: ArgMatches) -> Result<()> {
     let name: String = match binding.subcommand() {
         Some(("init", matches)) => matches
             .get_one::<String>("name")
@@ -38,30 +70,21 @@ fn main() -> Result<()> {
     if !dir_path.exists() {
         mkdir(&dir_path)?;
     }
-    // create a dune-project
-    let dune_project_contents = dune_project(name.clone())?;
-    let dune_project_file = dir_path.join("dune_project");
-    let mut dune_project_file = touch(&dune_project_file)?;
-    // a .opam file
-    let mut opam_file = String::new();
-    opam_file.push_str(name.clone().as_str());
-    opam_file.push_str(".opam");
-
-    let opam_file = touch(&dir_path.join(opam_file))?;
-    // if --bin flag then create bin
-    let bin_dir = mkdir(&dir_path.join("bin"))?;
-    // main.ml file inside bin
-    let main_ml_contents = main_ml()?;
-    let mut main_ml_file = touch(&dir_path.join("bin").join("main.ml"))?;
-    // default is bin + test
-    // workspace is bin + lib + test
-    // by default lib + test
-    //
-    // fill up the dune_project and opam file
-    dune_project_file.write(dune_project_contents.as_bytes())?;
-    main_ml_file.write(main_ml_contents.as_bytes())?;
 
     Ok(())
+}
+
+fn init(path_str: String) -> impl Into<Command> {
+    Command::new("init")
+        .arg(
+            Arg::new("path")
+                .long("path")
+                .short('p')
+                .require_equals(false)
+                .default_value(path_str)
+                .value_parser(value_parser!(PathBuf)),
+        )
+        .arg(Arg::new("name").required(true))
 }
 
 fn touch(path: &PathBuf) -> Result<std::fs::File> {
@@ -70,10 +93,6 @@ fn touch(path: &PathBuf) -> Result<std::fs::File> {
 
 fn mkdir(dir: &PathBuf) -> Result<()> {
     std::fs::create_dir(dir).map_err(Into::into)
-}
-
-fn cd(path: &PathBuf) -> Result<()> {
-    std::env::set_current_dir(path).map_err(Into::into)
 }
 
 fn dune_project(name: String) -> Result<String> {
