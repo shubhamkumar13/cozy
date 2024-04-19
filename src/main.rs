@@ -2,16 +2,21 @@ use std::{env::current_dir, io::Write, path::PathBuf, str::FromStr};
 
 use anyhow::Result;
 use clap::{value_parser, Arg, ArgMatches, Command, Subcommand};
+use duct::cmd;
 use indoc::formatdoc;
 
 fn main() -> Result<()> {
     let path_str = current_dir()?.as_os_str().to_string_lossy().to_string();
 
-    let cmd = Command::new("cozy").subcommand(init(path_str));
-    init_matches(cmd)?;
+    let cmd = Command::new("cozy")
+        .subcommand(init(path_str))
+        .subcommand(Command::new("build"))
+        .subcommand(Command::new("run"));
+    matches(cmd)?;
     Ok(())
 }
 
+#[derive(Debug)]
 struct File {
     name: String,
     dir_path: PathBuf,
@@ -33,12 +38,15 @@ impl File {
     }
 }
 
+#[derive(Debug)]
 struct Dir;
 
+#[derive(Debug)]
 struct Project {
     dune_project: File,
     opam_file: File,
     bin: Option<Dir>,
+    package_json: serde_json::Value,
 }
 
 impl Project {
@@ -100,11 +108,12 @@ impl Project {
             dune_project: create_dune_project(&"dune-project".to_string(), &dir_path)?,
             opam_file: create_opam_file(&name, &dir_path)?,
             bin: None,
+            package_json: serde_json::value::Value::default(),
         })
     }
 }
 
-fn init_matches(cmd: Command) -> Result<()> {
+fn matches(cmd: Command) -> Result<()> {
     let mut cmd_ = cmd.clone();
     let binding = cmd.get_matches();
 
@@ -131,6 +140,31 @@ fn init_matches(cmd: Command) -> Result<()> {
             }
 
             Project::new(name, dir_path)?;
+        }
+
+        Some(("build", _)) => {
+            // esy ocamlfind ocamlc -package <| packages |> -linkpkg  <| all the stuff in bin
+            // directory
+            let esy = "esy";
+            let ocamlfind = "ocamlfind";
+            let ocamlc = "ocamlc";
+            let mut packages: Vec<String> = vec![];
+            let package_flag = "-package";
+            let linkpkg_flag = "-linkpkg";
+            let cwd = current_dir()?;
+            let bin_dir = cwd.join("bin").join("main.ml");
+
+            let cmd = cmd!(
+                esy,
+                ocamlfind,
+                ocamlc,
+                package_flag,
+                packages.join(","),
+                linkpkg_flag,
+                bin_dir
+            );
+
+            ()
         }
         None => (),
         _ => unreachable!("This is not a subcommand or you shouldn't be here"),

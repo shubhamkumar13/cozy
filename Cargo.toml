@@ -11,5 +11,6 @@ anyhow = "1.0.82"
 indoc = "2.0.5"
 miette = "7.2.0"
 serde_json = { version = "1.0.116", features = ["alloc"] }
+duct = "0.13.7"
 
 [dev-dependencies]
