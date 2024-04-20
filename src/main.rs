@@ -1,9 +1,10 @@
-use std::{env::current_dir, io::Write, path::PathBuf, str::FromStr};
+use std::{env::current_dir, io::{Read, Write}, path::PathBuf, str::FromStr};
 
 use anyhow::Result;
 use clap::{value_parser, Arg, ArgMatches, Command, Subcommand};
 use duct::cmd;
 use indoc::formatdoc;
+use serde_json::json;
 
 fn main() -> Result<()> {
     let path_str = current_dir()?.as_os_str().to_string_lossy().to_string();
@@ -39,14 +40,16 @@ impl File {
 }
 
 #[derive(Debug)]
-struct Dir;
+struct Dir {
+    path: PathBuf,
+}
 
 #[derive(Debug)]
 struct Project {
     dune_project: File,
     opam_file: File,
     bin: Option<Dir>,
-    package_json: serde_json::Value,
+    package_json: File,
 }
 
 impl Project {
@@ -93,7 +96,7 @@ impl Project {
             opam_file.push_str(".opam");
             File::new(opam_file, dir_path.clone(), String::new())
         }
-        fn create_bin_dir(dir_path: &PathBuf) -> Result<File> {
+        fn create_bin_dir(dir_path: &PathBuf) -> Result<Dir> {
             let bin_dir = dir_path.join("bin");
             mkdir(&bin_dir)?;
             // main.ml file inside bin
@@ -101,14 +104,33 @@ impl Project {
                 Ok(r#"let () = print_endline "Hello, World!""#)
             }
             let main_ml_contents = main_ml()?.into();
-            File::new("main.ml".into(), bin_dir, main_ml_contents)
+            let var_name = File::new("main.ml".into(), bin_dir.clone(), main_ml_contents)?;
+            Ok(Dir { path: bin_dir })
         }
-        create_bin_dir(&dir_path)?;
+        fn create_package_json(dir_path: &PathBuf) -> Result<File> {
+            let package_json = json! ({
+                "dependencies": {
+                    "ocaml" : "5.x"
+                },
+                "devDependencies": {
+                    "@opam/ocaml-lsp-server": "*",
+                    "@opam/dot-merlin-reader": "*",
+                    "@opam/ocamlformat": "*",
+                }
+            });
+            File::new(
+                "package.json".to_string(),
+                dir_path.clone(),
+                package_json.to_string(),
+            )
+        }
+        let bin = create_bin_dir(&dir_path).ok();
+        let package_json = create_package_json(&dir_path);
         Ok(Self {
             dune_project: create_dune_project(&"dune-project".to_string(), &dir_path)?,
             opam_file: create_opam_file(&name, &dir_path)?,
-            bin: None,
-            package_json: serde_json::value::Value::default(),
+            bin,
+            package_json: create_package_json(&dir_path)?,
         })
     }
 }
@@ -116,6 +138,11 @@ impl Project {
 fn matches(cmd: Command) -> Result<()> {
     let mut cmd_ = cmd.clone();
     let binding = cmd.get_matches();
+    let esy = "esy";
+    let ocamlfind = "ocamlfind";
+    let ocamlc = "ocamlc";
+    let package_flag = "-package";
+    let linkpkg_flag = "-linkpkg";
 
     let name: String = match binding.subcommand() {
         Some(("init", matches)) => matches
@@ -127,6 +154,8 @@ fn matches(cmd: Command) -> Result<()> {
             cmd_.print_long_help()?;
             "".to_string()
         }
+        Some(("build", _)) => "".to_string(),
+        Some(("run", _)) => "".to_string(),
         _ => unreachable!("Somehow the error for name arg didn't work so Idk what happened"),
     };
     match binding.subcommand() {
@@ -145,27 +174,36 @@ fn matches(cmd: Command) -> Result<()> {
         Some(("build", _)) => {
             // esy ocamlfind ocamlc -package <| packages |> -linkpkg  <| all the stuff in bin
             // directory
-            let esy = "esy";
-            let ocamlfind = "ocamlfind";
-            let ocamlc = "ocamlc";
-            let mut packages: Vec<String> = vec![];
-            let package_flag = "-package";
-            let linkpkg_flag = "-linkpkg";
             let cwd = current_dir()?;
-            let bin_dir = cwd.join("bin").join("main.ml");
+            let main_ml_path = cwd.join("bin").join("main.ml");
 
-            let cmd = cmd!(
-                esy,
-                ocamlfind,
-                ocamlc,
-                package_flag,
-                packages.join(","),
-                linkpkg_flag,
-                bin_dir
-            );
+            let package_json_path = cwd.join("package.json");
+            let mut buf = String::new();
+            std::fs::File::open(package_json_path)?.read_to_string(&mut buf)?;
+            let package_json : serde_json::Value = serde_json::from_str(buf.as_str())?;
+            let packages = package_json.as_object().map(|x| {
+                x.get("dependencies")
+                .and_then(|v| {
+                    match v.as_object() {
+                        Some(o) => {
+                            Some(o.keys().map(ToOwned::to_owned).filter(|x| x != "ocaml"))
+                        },
+                        None => None,
+                    }
+                })
+                .expect("Couldn't find keys")
+                .collect::<Vec<String>>()
+            })
+            .expect("Couldn't find dependencies"); 
+
+            cmd!(esy, "install").run()?;
+            cmd!(esy, ocamlfind, ocamlc, package_flag, packages.join(","), linkpkg_flag, main_ml_path).run()?;
 
             ()
         }
+        Some(("run", _)) => {
+            cmd!(esy, "./a.out").run()?;
+        },
         None => (),
         _ => unreachable!("This is not a subcommand or you shouldn't be here"),
     };
