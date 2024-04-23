@@ -1,0 +1,5 @@
+(executable
+ (name cozy)
+ (public_name cozy)
+ (libraries opam-repository opam-core rresult)
+ (modes exe object))

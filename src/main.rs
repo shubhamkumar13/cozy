@@ -6,7 +6,15 @@ use duct::cmd;
 use indoc::formatdoc;
 use serde_json::json;
 
+ocaml::import! {
+    fn hello() -> String
+}
+
 fn main() -> Result<()> {
+    let gc = ocaml::runtime::init();
+    unsafe {
+        println!("{:?}", hello(&gc));
+    }
     let path_str = current_dir()?.as_os_str().to_string_lossy().to_string();
 
     let cmd = Command::new("cozy")
@@ -174,10 +182,15 @@ fn matches(cmd: Command) -> Result<()> {
         Some(("build", _)) => {
             // esy ocamlfind ocamlc -package <| packages |> -linkpkg  <| all the stuff in bin
             // directory
-            let cwd = current_dir()?;
-            let main_ml_path = cwd.join("bin").join("main.ml");
 
+            // 1 - Get the current directory
+            let cwd = current_dir()?;
+            // 2 - Get the main.ml path
+            let main_ml_path = cwd.join("bin").join("main.ml");
+            // 3 - Get the package.json path
             let package_json_path = cwd.join("package.json");
+
+            // 4 - Access the dependencies of package.json
             let mut buf = String::new();
             std::fs::File::open(package_json_path)?.read_to_string(&mut buf)?;
             let package_json : serde_json::Value = serde_json::from_str(buf.as_str())?;
@@ -196,7 +209,11 @@ fn matches(cmd: Command) -> Result<()> {
             })
             .expect("Couldn't find dependencies"); 
 
+            // 5 - execute the esy install command (which builds a sandbox and installs all the dependencies present in package.json and devDependencies in package.json)
             cmd!(esy, "install").run()?;
+
+            // builds the executable of main.ml file, mostly comprises of all the dependencies and nothing else 
+            // (TODO but can later be about stuff in lib directory or something else)
             cmd!(esy, ocamlfind, ocamlc, package_flag, packages.join(","), linkpkg_flag, main_ml_path).run()?;
 
             ()

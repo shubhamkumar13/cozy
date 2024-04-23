@@ -13,5 +13,9 @@ miette = "7.2.0"
 serde_json = { version = "1.0.116", features = ["alloc"] }
 duct = "0.13.7"
 itertools = "0.12.1"
+ocaml = {git = "https://github.com/zshipko/ocaml-rs"}
+
+[build-dependencies]
+ocaml-build = {git = "https://github.com/zshipko/ocaml-rs", features=["dune"]}
 
 [dev-dependencies]

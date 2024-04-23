@@ -57,6 +57,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f538837af36e6f6a9be0faa67f9a314f8119e4e4b5867c6ab40ed60360142519"
 
 [[package]]
+name = "cc"
+version = "1.0.95"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d32a725bc159af97c3e629873bb9f88fb8cf8a4867175f76dc987815ea07c83b"
+
+[[package]]
 name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -105,8 +111,16 @@ dependencies = [
  "indoc",
  "itertools",
  "miette",
+ "ocaml",
+ "ocaml-build",
  "serde_json",
 ]
+
+[[package]]
+name = "cty"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b365fabc795046672053e29c954733ec3b05e4be654ab130fe8f1f94d7051f35"
 
 [[package]]
 name = "duct"
@@ -174,6 +188,54 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "ocaml"
+version = "1.0.0-beta.5"
+source = "git+https://github.com/zshipko/ocaml-rs#3b637f09b694f176c2a5c0d0d988baa04f161b8b"
+dependencies = [
+ "ocaml-boxroot-sys",
+ "ocaml-derive",
+ "ocaml-sys",
+]
+
+[[package]]
+name = "ocaml-boxroot-sys"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "541b4c121093aa5bfb1b0e0d6f8ca00c807b156445bc4f4e19683421f6d26208"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "ocaml-build"
+version = "1.0.0-beta.5"
+source = "git+https://github.com/zshipko/ocaml-rs#3b637f09b694f176c2a5c0d0d988baa04f161b8b"
+dependencies = [
+ "cc",
+ "proc-macro2",
+ "syn",
+]
+
+[[package]]
+name = "ocaml-derive"
+version = "1.0.0-beta.5"
+source = "git+https://github.com/zshipko/ocaml-rs#3b637f09b694f176c2a5c0d0d988baa04f161b8b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "ocaml-sys"
+version = "0.24.0"
+source = "git+https://github.com/zshipko/ocaml-rs#3b637f09b694f176c2a5c0d0d988baa04f161b8b"
+dependencies = [
+ "cc",
+ "cty",
 ]
 
 [[package]]
