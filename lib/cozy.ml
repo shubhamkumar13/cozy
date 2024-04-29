@@ -30,7 +30,9 @@ let untar () =
 
 let f () = 
     let overwrite = true in
+    (* download from opam universe *)
     let* _ = Process.Job.run @@ Download.download ~overwrite url dir |> Result.ok in
+    (* extract tarball *)
     let* _ = untar () in
     Result.ok ()
 

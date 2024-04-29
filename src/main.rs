@@ -1,21 +1,30 @@
-use std::{env::current_dir, io::{Read, Write}, path::PathBuf, str::FromStr};
+use std::{
+    any, char, env::current_dir, io::{Read, Write}, path::PathBuf, str::FromStr
+};
 
 use anyhow::Result;
+use base64::Engine;
 use clap::{value_parser, Arg, ArgMatches, Command, Subcommand};
 use duct::cmd;
 use indoc::formatdoc;
+use ocaml::sys::Value;
+use opam_file_rs::value::{OpamFileItem, OpamFileSection};
+use scraper::{Html, Node, Selector};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 ocaml::import! {
     fn hello() -> String
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let gc = ocaml::runtime::init();
     unsafe {
-        println!("{:?}", hello(&gc));
+        println!("This is gc : {:?}", hello(&gc));
     }
     let path_str = current_dir()?.as_os_str().to_string_lossy().to_string();
+    fetch("fmt", "0.7.1").await?;
 
     let cmd = Command::new("cozy")
         .subcommand(init(path_str))
@@ -193,34 +202,43 @@ fn matches(cmd: Command) -> Result<()> {
             // 4 - Access the dependencies of package.json
             let mut buf = String::new();
             std::fs::File::open(package_json_path)?.read_to_string(&mut buf)?;
-            let package_json : serde_json::Value = serde_json::from_str(buf.as_str())?;
-            let packages = package_json.as_object().map(|x| {
-                x.get("dependencies")
-                .and_then(|v| {
-                    match v.as_object() {
-                        Some(o) => {
-                            Some(o.keys().map(ToOwned::to_owned).filter(|x| x != "ocaml"))
-                        },
-                        None => None,
-                    }
+            let package_json: serde_json::Value = serde_json::from_str(buf.as_str())?;
+            let packages = package_json
+                .as_object()
+                .map(|x| {
+                    x.get("dependencies")
+                        .and_then(|v| match v.as_object() {
+                            Some(o) => {
+                                Some(o.keys().map(ToOwned::to_owned).filter(|x| x != "ocaml"))
+                            }
+                            None => None,
+                        })
+                        .expect("Couldn't find keys")
+                        .collect::<Vec<String>>()
                 })
-                .expect("Couldn't find keys")
-                .collect::<Vec<String>>()
-            })
-            .expect("Couldn't find dependencies"); 
+                .expect("Couldn't find dependencies");
 
             // 5 - execute the esy install command (which builds a sandbox and installs all the dependencies present in package.json and devDependencies in package.json)
             cmd!(esy, "install").run()?;
 
-            // builds the executable of main.ml file, mostly comprises of all the dependencies and nothing else 
+            // builds the executable of main.ml file, mostly comprises of all the dependencies and nothing else
             // (TODO but can later be about stuff in lib directory or something else)
-            cmd!(esy, ocamlfind, ocamlc, package_flag, packages.join(","), linkpkg_flag, main_ml_path).run()?;
+            cmd!(
+                esy,
+                ocamlfind,
+                ocamlc,
+                package_flag,
+                packages.join(","),
+                linkpkg_flag,
+                main_ml_path
+            )
+            .run()?;
 
             ()
         }
         Some(("run", _)) => {
             cmd!(esy, "./a.out").run()?;
-        },
+        }
         None => (),
         _ => unreachable!("This is not a subcommand or you shouldn't be here"),
     };
@@ -243,4 +261,52 @@ fn init(path_str: String) -> impl Into<Command> {
 
 fn mkdir(dir: &PathBuf) -> Result<()> {
     std::fs::create_dir(dir).map_err(Into::into)
+}
+
+// const SEQ_LEN: usize = 5;
+
+// fn convert_result_to_string(guess_result: Vec<u8>) -> String {
+//     let mut output = std::string::String::new();
+
+//     for (i, num) in guess_result.iter().enumerate() {
+//         if *num == 0 {
+//             output.push_str("*");
+//         } else if *num == 10 {
+//             output.push_str("$");
+//         } else {
+//             // std::write!(output, "{num}").unwrap();
+//             std::fmt::write(&mut output, format_args!("{num}")).unwrap();
+//         }
+//         if i < SEQ_LEN - 1 {
+//             output.push(' ');
+//         }
+//     }
+
+//     output
+// }
+
+async fn fetch(pkg_name: &'static str, pkg_version: &'static str) -> Result<(), anyhow::Error> {
+    // download the .opam file for the repo file
+    let pkg_path = format!("{}.{}", pkg_name, pkg_version);
+    let path = format!("/repos/ocaml/opam-repository/contents/packages/{}/{}/opam", pkg_name, pkg_path);
+    let octo = octocrab::instance();
+    let opam_file = octo.get::<serde_json::Value, &String, ()>(&path, None::<&()>).await?;
+    // search the file in the repo : 
+    // <path-to-opam-repo>/opam-repository/packages/<package-name>/<package-name>.<version>
+    // todo!()
+    let hmap = opam_file.as_object().expect("object cannot be coerced to a map");
+    let download_url = hmap.get("download_url").expect("download_url is null").to_string().chars().filter(|x| *x != '\"').collect::<String>();
+    let res = reqwest::get(download_url).await?;
+    let json = res.text().await?.clone();
+    let mut file = match std::fs::File::create_new("/home/sk/rust-projects/cozy/opam") {
+        Ok(file) => file,
+        Err(_) => {
+            let _ =std::fs::remove_file("/home/sk/rust-projects/cozy/opam")?;
+            let file = std::fs::File::create_new("/home/sk/rust-projects/cozy/opam")?;
+            file
+        },
+    };
+    file.write_all(json.as_bytes())?;
+
+    Ok(())
 }
