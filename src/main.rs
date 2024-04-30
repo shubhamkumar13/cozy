@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
     let path_str = current_dir()?.as_os_str().to_string_lossy().to_string();
     fetch("fmt", "0.7.1").await?;
     let path = "/home/sk/rust-projects/cozy/opam".to_string();
-    let _ = get_tarball_url_checksum(&path).await?;
+    let (checksum, url) = extract_tarball_url_checksum(&path).await?;
 
     let cmd = Command::new("cozy")
         .subcommand(init(path_str))
@@ -333,7 +333,7 @@ async fn fetch(pkg_name: &'static str, pkg_version: &'static str) -> Result<(), 
     Ok(())
 }
 
-async fn get_tarball_url_checksum(path: &String) -> Result<(String, String), anyhow::Error> {
+async fn extract_tarball_url_checksum(path: &String) -> Result<(String, String), anyhow::Error> {
     let mut opam_file = String::new();
     std::fs::File::open(path)?.read_to_string(&mut opam_file)?;
     let parsed_opam_file = opam_file_rs::parse(&opam_file)?;
@@ -366,13 +366,20 @@ async fn get_tarball_url_checksum(path: &String) -> Result<(String, String), any
             }
             opam_file_rs::value::OpamFileItem::Variable(_, _, _) => false,
         })
-        .map(|x| {
+        .filter_map(|x| {
             match x {
-                opam_file_rs::value::OpamFileItem::Section(_, opam_file_item) => ,
+                opam_file_rs::value::OpamFileItem::Section(_, opam_file_item) => match (&opam_file_item.section_item[0], &opam_file_item.section_item[1]) {
+                    (opam_file_rs::value::OpamFileItem::Section(_, _), opam_file_rs::value::OpamFileItem::Section(_, _)) => None,
+                    (opam_file_rs::value::OpamFileItem::Section(_, _), opam_file_rs::value::OpamFileItem::Variable(_, _, _)) => None,
+                    (opam_file_rs::value::OpamFileItem::Variable(_, _, _), opam_file_rs::value::OpamFileItem::Section(_, _)) => None,
+                    (opam_file_rs::value::OpamFileItem::Variable(_, _, c), opam_file_rs::value::OpamFileItem::Variable(_, _, s)) => match (c.clone().kind, s.clone().kind) {
+                        (opam_file_rs::value::ValueKind::String(checksum), opam_file_rs::value::ValueKind::String(url)) => Some((checksum, url)),
+                        (_, _) => None
+                    }
+                },
                 opam_file_rs::value::OpamFileItem::Variable(_, _, _) => todo!(),
             }
         })
-        .collect::<Vec<opam_file_rs::value::OpamFileItem>>();
-    dbg!(parsed_opam_file);
-    Ok(("".to_string(), "".to_string()))
+        .collect::<Vec<(String, String)>>()[0].clone();
+    Ok((parsed_opam_file.0, parsed_opam_file.1))
 }
