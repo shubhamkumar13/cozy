@@ -1,16 +1,15 @@
 use std::{
-    any, char, env::current_dir, io::{Read, Write}, path::PathBuf, str::FromStr
+    arch::x86_64::_CMP_EQ_OS,
+    env::current_dir,
+    io::{Read, Write},
+    path::PathBuf,
 };
 
 use anyhow::Result;
-use base64::Engine;
-use clap::{value_parser, Arg, ArgMatches, Command, Subcommand};
+use clap::{value_parser, Arg, Command};
 use duct::cmd;
 use indoc::formatdoc;
-use ocaml::sys::Value;
-use opam_file_rs::value::{OpamFileItem, OpamFileSection};
-use scraper::{Html, Node, Selector};
-use serde::{Deserialize, Serialize};
+use opam_file_rs::value::{OpamFile, OpamFileSection};
 use serde_json::json;
 
 ocaml::import! {
@@ -25,6 +24,8 @@ async fn main() -> Result<()> {
     }
     let path_str = current_dir()?.as_os_str().to_string_lossy().to_string();
     fetch("fmt", "0.7.1").await?;
+    let path = "/home/sk/rust-projects/cozy/opam".to_string();
+    let _ = get_tarball_url_checksum(&path).await?;
 
     let cmd = Command::new("cozy")
         .subcommand(init(path_str))
@@ -35,6 +36,7 @@ async fn main() -> Result<()> {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct File {
     name: String,
     dir_path: PathBuf,
@@ -57,11 +59,13 @@ impl File {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct Dir {
     path: PathBuf,
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct Project {
     dune_project: File,
     opam_file: File,
@@ -286,27 +290,89 @@ fn mkdir(dir: &PathBuf) -> Result<()> {
 // }
 
 async fn fetch(pkg_name: &'static str, pkg_version: &'static str) -> Result<(), anyhow::Error> {
-    // download the .opam file for the repo file
+    // create package path for opam-repository
     let pkg_path = format!("{}.{}", pkg_name, pkg_version);
-    let path = format!("/repos/ocaml/opam-repository/contents/packages/{}/{}/opam", pkg_name, pkg_path);
+    let path = format!(
+        "/repos/ocaml/opam-repository/contents/packages/{}/{}/opam",
+        pkg_name, pkg_path
+    );
+
+    // get the opam file metadata for the above path using octocrab
     let octo = octocrab::instance();
-    let opam_file = octo.get::<serde_json::Value, &String, ()>(&path, None::<&()>).await?;
-    // search the file in the repo : 
-    // <path-to-opam-repo>/opam-repository/packages/<package-name>/<package-name>.<version>
-    // todo!()
-    let hmap = opam_file.as_object().expect("object cannot be coerced to a map");
-    let download_url = hmap.get("download_url").expect("download_url is null").to_string().chars().filter(|x| *x != '\"').collect::<String>();
+    let opam_file_metadata = octo
+        .get::<serde_json::Value, &String, ()>(&path, None::<&()>)
+        .await?;
+
+    // convert to a map
+    let hmap = opam_file_metadata
+        .as_object()
+        .expect("object cannot be coerced to a map");
+
+    // get the tarball url
+    let download_url = hmap
+        .get("download_url")
+        .expect("download_url is null")
+        .to_string()
+        .chars()
+        .filter(|x| *x != '\"')
+        .collect::<String>();
+
+    // get tarball
     let res = reqwest::get(download_url).await?;
     let json = res.text().await?.clone();
+    let json = json.trim_end().to_string();
     let mut file = match std::fs::File::create_new("/home/sk/rust-projects/cozy/opam") {
         Ok(file) => file,
         Err(_) => {
-            let _ =std::fs::remove_file("/home/sk/rust-projects/cozy/opam")?;
+            let _ = std::fs::remove_file("/home/sk/rust-projects/cozy/opam")?;
             let file = std::fs::File::create_new("/home/sk/rust-projects/cozy/opam")?;
             file
-        },
+        }
     };
     file.write_all(json.as_bytes())?;
-
     Ok(())
+}
+
+async fn get_tarball_url_checksum(path: &String) -> Result<(String, String), anyhow::Error> {
+    let mut opam_file = String::new();
+    std::fs::File::open(path)?.read_to_string(&mut opam_file)?;
+    let parsed_opam_file = opam_file_rs::parse(&opam_file)?;
+    let parsed_opam_file = parsed_opam_file
+        .file_contents
+        .into_iter()
+        .filter(|x| match x {
+            opam_file_rs::value::OpamFileItem::Section(_, opam_file_section) => {
+                match (
+                    &opam_file_section.section_item[0],
+                    &opam_file_section.section_item[1],
+                ) {
+                    (
+                        opam_file_rs::value::OpamFileItem::Variable(_, _, _),
+                        opam_file_rs::value::OpamFileItem::Variable(_, _, _),
+                    ) => true,
+                    (
+                        opam_file_rs::value::OpamFileItem::Section(_, _),
+                        opam_file_rs::value::OpamFileItem::Section(_, _),
+                    )
+                    | (
+                        opam_file_rs::value::OpamFileItem::Section(_, _),
+                        opam_file_rs::value::OpamFileItem::Variable(_, _, _),
+                    )
+                    | (
+                        opam_file_rs::value::OpamFileItem::Variable(_, _, _),
+                        opam_file_rs::value::OpamFileItem::Section(_, _),
+                    ) => false,
+                }
+            }
+            opam_file_rs::value::OpamFileItem::Variable(_, _, _) => false,
+        })
+        .map(|x| {
+            match x {
+                opam_file_rs::value::OpamFileItem::Section(_, opam_file_item) => ,
+                opam_file_rs::value::OpamFileItem::Variable(_, _, _) => todo!(),
+            }
+        })
+        .collect::<Vec<opam_file_rs::value::OpamFileItem>>();
+    dbg!(parsed_opam_file);
+    Ok(("".to_string(), "".to_string()))
 }
