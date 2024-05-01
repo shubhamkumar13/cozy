@@ -8,7 +8,9 @@ use std::{
 use anyhow::Result;
 use clap::{value_parser, Arg, Command};
 use duct::cmd;
+use hex::FromHex;
 use indoc::formatdoc;
+use ocaml::ToValue;
 use opam_file_rs::value::{OpamFile, OpamFileSection};
 use serde_json::json;
 
@@ -23,9 +25,10 @@ async fn main() -> Result<()> {
         println!("This is gc : {:?}", hello(&gc));
     }
     let path_str = current_dir()?.as_os_str().to_string_lossy().to_string();
-    fetch("fmt", "0.7.1").await?;
+    fetch("fmt", "0.9.0").await?;
     let path = "/home/sk/rust-projects/cozy/opam".to_string();
     let (checksum, url) = extract_tarball_url_checksum(&path).await?;
+    fetch_tarball(url, checksum).await?;
 
     let cmd = Command::new("cozy")
         .subcommand(init(path_str))
@@ -382,4 +385,59 @@ async fn extract_tarball_url_checksum(path: &String) -> Result<(String, String),
         })
         .collect::<Vec<(String, String)>>()[0].clone();
     Ok((parsed_opam_file.0, parsed_opam_file.1))
+}
+
+use anyhow::anyhow;
+use sha2::Digest;
+
+use futures_util::StreamExt;
+
+async fn fetch_tarball(url: String, checksum: String) -> Result<(), anyhow::Error> {
+
+    // create directory and file
+    let dir_path = "/home/sk/rust-projects/cozy/tarballs/";
+    let filename = url.split('/').last().expect("unable to split the url, check if the url is valid or not");
+    let file_path = format!("{}/{}", dir_path, filename);
+
+    // check if it exists
+    match std::fs::read_dir(dir_path) {
+        Ok(_) => { 
+        // delete and create 
+            std::fs::remove_dir_all(dir_path)?;
+            std::fs::create_dir(dir_path)?;
+        },
+        Err(_) => {
+            std::fs::create_dir(dir_path)?;
+        },
+    };
+    let mut file = std::fs::File::create_new(&file_path)?;
+
+    // create a GET request for the URL
+    let res = reqwest::get(&url).await?;
+    if res.status().is_success() {
+        let mut stream = res.bytes_stream();
+        // write the fetched stream to the file created above
+        loop {
+            let Some(Ok(item)) = stream.next().await else {
+                println!("Download Complete!");
+                break
+            };
+            file.write(&item)?;
+        };
+        Ok(())
+    } else {
+        Err(anyhow!("GET request to fetch the tarball failed"))
+    }?;
+
+    // verify the checksum
+    let checksum = checksum.split('=').collect::<Vec<&str>>()[1];
+    let mut hasher = sha2::Sha512::new();
+    let mut file = std::fs::File::open(&file_path)?;
+    std::io::copy(&mut file, &mut hasher)?;
+    let hash_bytes = hasher.finalize();
+
+    let decoded = <[u8; 64]>::from_hex(checksum).expect("");
+
+    assert_eq!(hash_bytes[..], decoded);
+    Ok(())
 }
